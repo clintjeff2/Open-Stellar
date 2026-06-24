@@ -169,6 +169,7 @@ export function createAgents(): MoltbotAgent[] {
       direction: "right" as const,
       spriteId: i % SPRITE_COUNT,
       skills: generateSkills(district.id),
+      autoRestart: i % 3 === 0,
     }
   })
 }

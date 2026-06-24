@@ -275,7 +275,7 @@ export function PixelCity({
   )
 
   const statusColors: Record<string, string> = {
-    active: "#34d399", working: "#fbbf24", idle: "#64748b", error: "#f87171", offline: "#1e293b",
+    active: "#34d399", working: "#fbbf24", idle: "#64748b", error: "#f87171", offline: "#f87171",
   }
 
   return (
@@ -411,6 +411,14 @@ export function PixelCity({
           </div>
           <div style={{ fontFamily: "monospace", fontSize: 9, color: "#64748b", lineHeight: 1.5 }}>
             <div>{hoveredAgent.status.toUpperCase()} · CPU {Math.round(hoveredAgent.cpu)}%</div>
+            {hoveredAgent.status === "offline" && (
+              <div style={{ color: "#f87171" }}>
+                Offline for {Math.floor((hoveredAgent.offlineForSeconds ?? 0) / 60)}m
+              </div>
+            )}
+            {hoveredAgent.lastHeartbeat && (
+              <div>Last seen {new Date(hoveredAgent.lastHeartbeat).toLocaleTimeString()}</div>
+            )}
             {hoveredAgent.currentTask && (
               <div style={{ color: "#94a3b8", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {hoveredAgent.currentTask}

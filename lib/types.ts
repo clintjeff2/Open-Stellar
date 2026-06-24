@@ -56,6 +56,9 @@ export interface MoltbotAgent {
   direction: "left" | "right"
   spriteId: number
   skills: Skill[]
+  autoRestart?: boolean
+  lastHeartbeat?: string
+  offlineForSeconds?: number
   wallet?: StellarWallet
 }
 

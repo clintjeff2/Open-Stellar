@@ -36,6 +36,17 @@ const ONBOARDING_STEPS = [
   },
 ]
 
+interface AgentHealthApiSnapshot {
+  agentId: string
+  status: "healthy" | "stale" | "offline"
+  runtimeStatus: "active" | "idle" | "working" | "error" | "offline"
+  lastHeartbeat: string
+  offlineForSeconds: number
+  cpu: number | null
+  memory: number | null
+  currentTask: string | null
+}
+
 function OnboardingModal({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0)
   const current = ONBOARDING_STEPS[step]
@@ -409,6 +420,80 @@ export function OpenStellarHub() {
   }, [applySystemEvent, pushLog])
 
   useEffect(() => {
+    let stopped = false
+
+    const sendHeartbeats = async () => {
+      const snapshot = agentsRef.current
+      await Promise.allSettled(
+        snapshot.map((agent) =>
+          fetch(`/api/agents/${encodeURIComponent(agent.id)}/heartbeat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: agent.status,
+              cpu: agent.cpu,
+              memory: agent.memory,
+              currentTask: agent.currentTask,
+              autoRestart: agent.autoRestart ?? false,
+            }),
+          }),
+        ),
+      )
+    }
+
+    const syncHealth = async () => {
+      const snapshot = agentsRef.current
+      const settled = await Promise.allSettled(
+        snapshot.map(async (agent) => {
+          const res = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/health`, { cache: "no-store" })
+          if (!res.ok) return null
+          const data = await res.json()
+          return data.health as AgentHealthApiSnapshot
+        }),
+      )
+
+      if (stopped) return
+
+      const healthById = new Map<string, AgentHealthApiSnapshot>()
+
+      for (const item of settled) {
+        if (item.status === "fulfilled" && item.value) {
+          healthById.set(item.value.agentId, item.value)
+        }
+      }
+
+      if (healthById.size === 0) return
+
+      setAgents((prev) =>
+        prev.map((agent) => {
+          const health = healthById.get(agent.id)
+          if (!health) return agent
+          return {
+            ...agent,
+            status: health.status === "offline" ? "offline" : health.runtimeStatus,
+            cpu: health.cpu ?? agent.cpu,
+            memory: health.memory ?? agent.memory,
+            currentTask: health.currentTask ?? agent.currentTask,
+            lastHeartbeat: health.lastHeartbeat,
+            offlineForSeconds: health.offlineForSeconds,
+          }
+        }),
+      )
+    }
+
+    sendHeartbeats()
+    syncHealth()
+    const heartbeatId = window.setInterval(sendHeartbeats, 15_000)
+    const healthId = window.setInterval(syncHealth, 30_000)
+
+    return () => {
+      stopped = true
+      window.clearInterval(heartbeatId)
+      window.clearInterval(healthId)
+    }
+  }, [])
+
+  useEffect(() => {
     const interval = window.setInterval(() => {
       setTick((prev) => prev + 1)
     }, 1200)
@@ -422,6 +507,15 @@ export function OpenStellarHub() {
     const interval = window.setInterval(() => {
       setAgents((prev) =>
         prev.map((agent) => {
+          if (agent.status === "offline") {
+            return {
+              ...agent,
+              cpu: 0,
+              memory: Math.max(0, agent.memory - 1),
+              taskProgress: 0,
+            }
+          }
+
           const progressDelta = Math.random() * 14
           const taskProgress = Math.min(100, agent.taskProgress + progressDelta)
           const finishedTask = taskProgress >= 100

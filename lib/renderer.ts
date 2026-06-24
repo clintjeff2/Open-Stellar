@@ -280,6 +280,15 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
     ctx.stroke()
   }
 
+  if (agent.status === "offline") {
+    const pulse = Math.sin(tick * 0.16) * 0.35 + 0.65
+    ctx.strokeStyle = `rgba(248,113,113,${pulse})`
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(cx, cy + 4, 18 + pulse * 4, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
   // Shadow
   ctx.fillStyle = "rgba(0,0,0,0.4)"
   ctx.beginPath()
@@ -335,6 +344,14 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
         ctx.stroke()
       }
     }
+  }
+
+  if (agent.status === "offline") {
+    ctx.font = "bold 7px monospace"
+    ctx.textAlign = "center"
+    ctx.fillStyle = "#f87171"
+    ctx.fillText("OFFLINE", cx, y - 6)
+    ctx.textAlign = "left"
   }
 
   // Status indicator dot (top right of sprite)
