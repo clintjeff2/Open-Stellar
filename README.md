@@ -39,6 +39,8 @@ API Routes (Next.js)
   ├─ /api/protocol/passport/status     GET  – lee attestation del agente
   ├─ /api/protocol/reputation          GET/POST – sistema de reputación
   ├─ /api/protocol/track8004           GET  – resolución ERC-8004
+  ├─ /api/events                       GET  – stream SSE de eventos del canvas
+  ├─ /api/events/:agentId              GET  – stream SSE filtrado por agente
   ├─ /api/stellar/balance              GET  – balance Stellar
   ├─ /api/stellar/build-tx             POST – construye transacción
   ├─ /api/stellar/submit-tx            POST – envía transacción firmada

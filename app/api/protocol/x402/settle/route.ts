@@ -3,6 +3,7 @@ import { peekX402Quote, settleX402 } from '@/lib/protocols/x402'
 import { authorizePayment } from '@/lib/passport/passport'
 import { isMockMode } from '@/lib/mock/mock-mode'
 import { settleMockX402 } from '@/lib/mock/x402-mock'
+import { publishSystemEvent } from '@/lib/events/system-events'
 
 export async function POST(req: Request) {
   try {
@@ -10,6 +11,7 @@ export async function POST(req: Request) {
     const paymentRef = String(body.paymentRef || '')
     const chain = body.chain === 'stellar' ? 'stellar' : 'bnb'
     const agentId = body.agentId ? String(body.agentId) : ''
+    const paidBy = String(body.paidBy || 'unknown')
 
     if (isMockMode()) {
       const receipt = settleMockX402({
@@ -41,12 +43,18 @@ export async function POST(req: Request) {
       paymentRef,
       chain,
       txHash: String(body.txHash || ''),
-      paidBy: String(body.paidBy || 'unknown'),
+      paidBy,
     })
 
     if (!result.ok || !result.receipt) {
       return NextResponse.json({ ok: false, error: result.error || 'x402 settlement rejected' }, { status: 400 })
     }
+
+    publishSystemEvent({
+      type: 'payment.received',
+      agentId: agentId || paidBy,
+      receipt: result.receipt,
+    })
 
     return NextResponse.json({ ok: true, receipt: result.receipt })
   } catch (error) {

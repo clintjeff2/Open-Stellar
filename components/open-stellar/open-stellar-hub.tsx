@@ -1,10 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { PixelCity, type TxAnimation } from "@/components/pixel-city"
+import { toast } from "sonner"
+import { PixelCity, type FloatingOverlay, type TxAnimation } from "@/components/pixel-city"
 import { SidebarPanel } from "@/components/sidebar-panel"
 import { PriceTicker } from "@/components/price-display"
 import { DISTRICTS, createAgents, generateChatMessage, getRandomTask } from "@/lib/data"
+import type { PublishedSystemEvent } from "@/lib/events/system-events"
 import type { ChatMessage, LogEntry, MoltbotAgent, WalletTransaction } from "@/lib/types"
 
 function nowTime() {
@@ -165,10 +167,14 @@ export function OpenStellarHub() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([])
   const [tick, setTick] = useState(0)
   const [txAnimations, setTxAnimations] = useState<TxAnimation[]>([])
+  const [floatingOverlays, setFloatingOverlays] = useState<FloatingOverlay[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [colorBlindMode, setColorBlindMode] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(false)
+  const [eventStreamConnected, setEventStreamConnected] = useState(false)
+  const [hasRealtimeEvents, setHasRealtimeEvents] = useState(false)
+  const fallbackLoggedRef = useRef(false)
 
   // Show onboarding once on first visit
   useEffect(() => {
@@ -235,10 +241,185 @@ export function OpenStellarHub() {
     pushLog("Open-Stellar v0 frontend initialized", "success")
   }, [pushLog])
 
+  const animateAgentToDistrict = useCallback((agent: MoltbotAgent) => {
+    const district = DISTRICTS.find((candidate) => candidate.id === agent.district)
+    if (!district) return
+
+    setTxAnimations((prev) => [
+      ...prev,
+      {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        fromX: agent.pixelX + 8,
+        fromY: agent.pixelY + 10,
+        toX: district.x + district.w / 2,
+        toY: district.y + district.h / 2,
+        startedAt: Date.now(),
+        duration: 1600,
+      },
+    ])
+  }, [])
+
+  const showAgentOverlay = useCallback((agent: MoltbotAgent, text: string, color = "#fbbf24") => {
+    setFloatingOverlays((prev) => [
+      ...prev,
+      {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        x: agent.pixelX + 8,
+        y: agent.pixelY,
+        text,
+        color,
+        startedAt: Date.now(),
+        duration: 2200,
+      },
+    ])
+  }, [])
+
+  const applySystemEvent = useCallback((event: PublishedSystemEvent) => {
+    let animatedAgent: MoltbotAgent | null = null
+
+    setAgents((prev) =>
+      prev.map((agent) => {
+        if (agent.id !== event.agentId) return agent
+
+        if (event.type === "agent.status") {
+          return { ...agent, status: event.status }
+        }
+
+        if (event.type === "task.started") {
+          return {
+            ...agent,
+            status: "working",
+            currentTask: event.task.title,
+            taskProgress: 0,
+          }
+        }
+
+        if (event.type === "task.completed") {
+          animatedAgent = agent
+          return {
+            ...agent,
+            status: "active",
+            currentTask: event.result.summary || getRandomTask(agent.district),
+            taskProgress: 0,
+            tasksCompleted: agent.tasksCompleted + 1,
+          }
+        }
+
+        if (event.type === "payment.received") {
+          animatedAgent = agent
+          return {
+            ...agent,
+            status: "active",
+          }
+        }
+
+        return agent
+      })
+    )
+
+    if (event.type === "task.completed") {
+      pushLog(`task completed: ${event.taskId} — ${event.result.summary}`, "success", event.agentId)
+      if (animatedAgent) {
+        animateAgentToDistrict(animatedAgent)
+        showAgentOverlay(animatedAgent, "+task", "#34d399")
+      }
+      return
+    }
+
+    if (event.type === "payment.received") {
+      pushLog(`payment received on ${event.receipt.chain}: ${event.receipt.txHash.slice(0, 12)}...`, "success", event.agentId)
+      const amount = event.receipt.amountUsd ? `$${event.receipt.amountUsd.toFixed(3)}` : event.receipt.chain
+      toast.success("Payment received", { description: `${event.agentId} settled ${amount}` })
+      if (animatedAgent) {
+        animateAgentToDistrict(animatedAgent)
+        showAgentOverlay(animatedAgent, `+${amount}`, "#fbbf24")
+      }
+      return
+    }
+
+    if (event.type === "agent.xp") {
+      pushLog(`XP update: +${event.xp}, level ${event.level}`, "success", event.agentId)
+      const agent = agentsRef.current.find((candidate) => candidate.id === event.agentId)
+      if (agent) showAgentOverlay(agent, `+${event.xp} XP`, "#22d3ee")
+      return
+    }
+
+    if (event.type === "badge.unlocked") {
+      pushLog(`badge unlocked: ${event.badge.name}`, "success", event.agentId)
+      toast.success("Badge unlocked", { description: `${event.agentId}: ${event.badge.name}` })
+      const agent = agentsRef.current.find((candidate) => candidate.id === event.agentId)
+      if (agent) showAgentOverlay(agent, event.badge.name, "#a78bfa")
+      return
+    }
+
+    if (event.type === "task.started") {
+      pushLog(`task started: ${event.task.title}`, "info", event.agentId)
+      return
+    }
+
+    pushLog(`status changed: ${event.status}`, "info", event.agentId)
+  }, [animateAgentToDistrict, pushLog, showAgentOverlay])
+
+  useEffect(() => {
+    const eventSource = new EventSource("/api/events")
+    const eventTypes = [
+      "agent.status",
+      "task.started",
+      "task.completed",
+      "payment.received",
+      "agent.xp",
+      "badge.unlocked",
+    ]
+
+    const handleEvent = (message: MessageEvent) => {
+      try {
+        setHasRealtimeEvents(true)
+        applySystemEvent(JSON.parse(String(message.data)) as PublishedSystemEvent)
+      } catch {
+        pushLog("received malformed real-time event", "warning")
+      }
+    }
+
+    eventSource.onopen = () => {
+      setEventStreamConnected(true)
+      fallbackLoggedRef.current = false
+      pushLog("real-time event stream connected", "success")
+    }
+
+    eventSource.onerror = () => {
+      setEventStreamConnected(false)
+      setHasRealtimeEvents(false)
+      if (!fallbackLoggedRef.current) {
+        pushLog("event stream unavailable; using local simulation fallback", "warning")
+        fallbackLoggedRef.current = true
+      }
+      eventSource.close()
+    }
+
+    for (const eventType of eventTypes) {
+      eventSource.addEventListener(eventType, handleEvent as EventListener)
+    }
+
+    return () => {
+      for (const eventType of eventTypes) {
+        eventSource.removeEventListener(eventType, handleEvent as EventListener)
+      }
+      eventSource.close()
+    }
+  }, [applySystemEvent, pushLog])
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       setTick((prev) => prev + 1)
+    }, 1200)
 
+    return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    if (eventStreamConnected && hasRealtimeEvents) return
+
+    const interval = window.setInterval(() => {
       setAgents((prev) =>
         prev.map((agent) => {
           const progressDelta = Math.random() * 14
@@ -268,7 +449,7 @@ export function OpenStellarHub() {
     }, 1200)
 
     return () => window.clearInterval(interval)
-  }, [])
+  }, [eventStreamConnected, hasRealtimeEvents])
 
   useEffect(() => {
     const chatInterval = window.setInterval(() => {
@@ -296,6 +477,15 @@ export function OpenStellarHub() {
     }, 500)
     return () => window.clearInterval(id)
   }, [txAnimations.length])
+
+  useEffect(() => {
+    if (floatingOverlays.length === 0) return
+    const id = window.setInterval(() => {
+      const now = Date.now()
+      setFloatingOverlays(prev => prev.filter(overlay => now - overlay.startedAt < overlay.duration))
+    }, 500)
+    return () => window.clearInterval(id)
+  }, [floatingOverlays.length])
 
   const handleSelectAgent = useCallback((id: string | null) => {
     setSelectedAgentId(id)
@@ -356,6 +546,7 @@ export function OpenStellarHub() {
           txAnimations={txAnimations}
           colorBlindMode={colorBlindMode}
           reduceMotion={reduceMotion}
+          floatingOverlays={floatingOverlays}
         />
 
         {/* Sidebar toggle button */}

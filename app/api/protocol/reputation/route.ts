@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { applyReputationAction, getReputation, listReputations } from '@/lib/reputation/reputation-store'
+import { publishSystemEvent } from '@/lib/events/system-events'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -20,6 +21,12 @@ export async function POST(req: Request) {
       delta: Number(body.delta || 0),
       reason: String(body.reason || 'manual-update'),
       scope: body.scope === 'governance' || body.scope === 'service' ? body.scope : 'tx',
+    })
+    publishSystemEvent({
+      type: 'agent.xp',
+      agentId: updated.actorId,
+      xp: Math.max(0, Number(body.delta || 0)),
+      level: Math.max(1, Math.floor(updated.score / 100)),
     })
 
     return NextResponse.json({ ok: true, reputation: updated })
