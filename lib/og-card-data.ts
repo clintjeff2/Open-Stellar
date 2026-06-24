@@ -1,0 +1,119 @@
+import { DISTRICTS, createAgents } from "@/lib/data"
+import type { District, DistrictId, MoltbotAgent } from "@/lib/types"
+
+export const AGENT_OG_SIZE = {
+  width: 1200,
+  height: 630,
+} as const
+
+export const AGENT_SPRITE_PATHS = [
+  "/sprites/robot-blue.gif",
+  "/sprites/robot-gold.gif",
+  "/sprites/robot-green.gif",
+  "/sprites/robot-heavy.webp",
+  "/sprites/robot-runner.gif",
+  "/sprites/robot-tank.gif",
+  "/sprites/robot-tv.gif",
+] as const
+
+export const DISTRICT_BACKGROUND_PATHS: Record<DistrictId, string> = {
+  "data-center": "/bg-data-center.jpg",
+  "comm-hub": "/bg-comm-hub.jpg",
+  processing: "/bg-processing.jpg",
+  defense: "/bg-defense.jpg",
+  research: "/bg-research.jpg",
+}
+
+export interface AgentCardStats {
+  level: number
+  tier: "Bronze" | "Silver" | "Gold" | "Platinum"
+  earnedXlm: string
+  uptime: string
+  skills: string[]
+}
+
+export function slugifyAgent(agent: Pick<MoltbotAgent, "id" | "name">): string {
+  return agent.name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || agent.id
+}
+
+function normalizeLookup(id: string): string {
+  try {
+    return decodeURIComponent(id).trim().toLowerCase()
+  } catch {
+    return id.trim().toLowerCase()
+  }
+}
+
+export function findAgentByLookup(id: string, agents: MoltbotAgent[] = createAgents()): MoltbotAgent | null {
+  const lookup = normalizeLookup(id)
+  return agents.find((agent) => (
+    agent.id.toLowerCase() === lookup ||
+    agent.name.toLowerCase() === lookup ||
+    slugifyAgent(agent) === lookup
+  )) ?? null
+}
+
+export function findDistrictByLookup(id: string): District | null {
+  const lookup = normalizeLookup(id)
+  return DISTRICTS.find((district) => (
+    district.id.toLowerCase() === lookup ||
+    district.name.toLowerCase() === lookup ||
+    district.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") === lookup
+  )) ?? null
+}
+
+export function getAgentDistrict(agent: MoltbotAgent): District {
+  return DISTRICTS.find((district) => district.id === agent.district) ?? DISTRICTS[0]
+}
+
+export function getAgentsForDistrict(districtId: DistrictId, agents: MoltbotAgent[] = createAgents()): MoltbotAgent[] {
+  return agents.filter((agent) => agent.district === districtId)
+}
+
+export function getAgentCardStats(agent: MoltbotAgent): AgentCardStats {
+  const totalSkillLevels = agent.skills.reduce((sum, skill) => sum + skill.level, 0)
+  const level = Math.max(1, Math.floor(agent.tasksCompleted / 24) + Math.max(1, Math.floor(totalSkillLevels / 3)))
+  const tier = level >= 28 ? "Platinum" : level >= 18 ? "Gold" : level >= 9 ? "Silver" : "Bronze"
+  const earned = agent.tasksCompleted * 0.014 + totalSkillLevels * 0.08
+  const uptime = Math.min(99.9, 96.5 + (agent.tasksCompleted % 34) / 10)
+
+  return {
+    level,
+    tier,
+    earnedXlm: earned.toFixed(1),
+    uptime: uptime.toFixed(1),
+    skills: agent.skills.slice(0, 5).map((skill) => skill.name),
+  }
+}
+
+export function getAgentProfilePath(agent: MoltbotAgent): string {
+  return `/agents/${slugifyAgent(agent)}`
+}
+
+export function getAgentOgPath(agent: MoltbotAgent): string {
+  return `/api/og/agent/${slugifyAgent(agent)}`
+}
+
+export function getDistrictOgPath(district: District): string {
+  return `/api/og/district/${district.id}`
+}
+
+export function getAgentSpritePath(agent: MoltbotAgent): string {
+  return AGENT_SPRITE_PATHS[agent.spriteId % AGENT_SPRITE_PATHS.length]
+}
+
+export function formatAgentShareText(agent: MoltbotAgent): string {
+  const stats = getAgentCardStats(agent)
+  const district = getAgentDistrict(agent)
+
+  return [
+    `My AI agent ${agent.name} just hit Level ${stats.level} on Open Stellar`,
+    `${agent.tasksCompleted.toLocaleString("en-US")} tasks completed - ${stats.earnedXlm} XLM earned - ${stats.uptime}% uptime`,
+    `${district.name} District`,
+  ].join("\n")
+}
+

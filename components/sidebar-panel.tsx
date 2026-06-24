@@ -1,8 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type ReactNode } from "react"
+import { Copy, Download, Share2 } from "lucide-react"
+import { toast } from "sonner"
 import type { MoltbotAgent, LogEntry, ChatMessage, WalletTransaction } from "@/lib/types"
 import { DISTRICTS } from "@/lib/data"
+import { formatAgentShareText, getAgentOgPath, getAgentProfilePath, slugifyAgent } from "@/lib/og-card-data"
 import { ChatPanel } from "./chat-panel"
 import { SkillsPanel } from "./skills-panel"
 import { WalletPanel } from "./wallet-panel"
@@ -45,6 +48,128 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
   return (
     <div style={{ background: "#0a0e17", borderRadius: 4, height: 8, overflow: "hidden" }}>
       <div style={{ width: `${value}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.3s" }} />
+    </div>
+  )
+}
+
+function ShareActionButton({
+  label,
+  title,
+  color,
+  icon,
+  onClick,
+}: {
+  label: string
+  title: string
+  color: string
+  icon: ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        width: "100%",
+        minHeight: 30,
+        padding: "6px 8px",
+        background: `${color}1a`,
+        border: `1px solid ${color}44`,
+        borderRadius: 5,
+        color,
+        cursor: "pointer",
+        fontFamily: "monospace",
+        fontSize: 9,
+        fontWeight: 700,
+        lineHeight: 1.1,
+        textTransform: "uppercase",
+      }}
+    >
+      {icon}
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+    </button>
+  )
+}
+
+function AgentShareControls({ agent }: { agent: MoltbotAgent }) {
+  const getAbsoluteUrl = (path: string) => {
+    if (typeof window === "undefined") return path
+    return new URL(path, window.location.origin).toString()
+  }
+
+  const profileUrl = getAbsoluteUrl(getAgentProfilePath(agent))
+  const imageUrl = getAbsoluteUrl(getAgentOgPath(agent))
+
+  const handleShareX = () => {
+    const params = new URLSearchParams({
+      text: formatAgentShareText(agent),
+      url: profileUrl,
+    })
+    window.open(`https://twitter.com/intent/tweet?${params.toString()}`, "_blank", "noopener,noreferrer")
+  }
+
+  const handleCopyImage = async () => {
+    try {
+      await navigator.clipboard.writeText(imageUrl)
+      toast.success("Image URL copied")
+    } catch {
+      toast.error("Could not copy image URL")
+    }
+  }
+
+  const handleDownload = async () => {
+    try {
+      const response = await fetch(imageUrl)
+      if (!response.ok) throw new Error("image fetch failed")
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = objectUrl
+      link.download = `open-stellar-${slugifyAgent(agent)}.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+      toast.success("OG card downloaded")
+    } catch {
+      toast.error("Could not download OG card")
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 10, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>
+        Share Card
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6 }}>
+        <ShareActionButton
+          label="Share on X"
+          title="Share this agent profile on X"
+          color="#22d3ee"
+          icon={<Share2 size={13} aria-hidden="true" />}
+          onClick={handleShareX}
+        />
+        <ShareActionButton
+          label="Copy image URL"
+          title="Copy this agent OG image URL"
+          color="#34d399"
+          icon={<Copy size={13} aria-hidden="true" />}
+          onClick={handleCopyImage}
+        />
+        <ShareActionButton
+          label="Download PNG"
+          title="Download this agent OG image"
+          color="#fbbf24"
+          icon={<Download size={13} aria-hidden="true" />}
+          onClick={handleDownload}
+        />
+      </div>
     </div>
   )
 }
@@ -160,6 +285,8 @@ function OverviewTab({ agents, selectedAgent, logs, onSelectAgent }: {
           <div suppressHydrationWarning style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>
             {"Completed: " + selectedAgent.tasksCompleted + " tasks"}
           </div>
+
+          <AgentShareControls agent={selectedAgent} />
         </div>
       )}
 
