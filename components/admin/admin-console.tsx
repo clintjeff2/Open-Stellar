@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { Activity, AlertTriangle, Check, Cloud, Code2, Copy, Cpu, Download, ExternalLink, Fingerprint, ReceiptText, History, KeyRound, Layers3, ListChecks, RadioTower, Rocket, Server, Shield, Terminal, Wallet } from "lucide-react"
+import { Activity, AlertTriangle, Check, Cloud, Code2, Copy, Cpu, Download, ExternalLink, Fingerprint, ReceiptText, History, KeyRound, Layers3, ListChecks, RadioTower, Rocket, Server, Shield, Terminal, Wallet, UsersRound, X } from "lucide-react"
 import type { District, MoltbotAgent } from "@/lib/types"
+import type { OrchestrationRun, RunListItem } from "@/lib/orchestration/runs"
 import { PassportPanel } from "@/components/admin/passport-panel"
 
-type AdminTab = "overview" | "queue" | "passport" | "private-deploy" | "receipts" | "cloud-agents"
+type AdminTab = "overview" | "agents" | "queue" | "passport" | "private-deploy" | "receipts" | "cloud-agents"
 
 type Plan = {
   name: string
@@ -19,6 +20,8 @@ type Plan = {
 type AdminConsoleProps = {
   agents: MoltbotAgent[]
   districts: District[]
+  initialRuns?: RunListItem[]
+  initialTasks?: QueueTask[]
 }
 
 const plans: Plan[] = [
@@ -58,12 +61,16 @@ const subscriptions = [
   { agent: "vega-9", service: "routing-api", plan: "Pro", used: 6610, limit: 10000, renewsAt: "2026-07-09", mrr: "20 XLM", status: "grace" },
 ] as const
 
-export function AdminConsole({ agents, districts }: AdminConsoleProps) {
+export function AdminConsole({ agents, districts, initialRuns = [], initialTasks = [] }: AdminConsoleProps) {
   const [copied, setCopied] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<Plan>(plans[1])
   const [tab, setTab] = useState<AdminTab>("overview")
+  const [runs, setRuns] = useState<RunListItem[]>(initialRuns)
+  const [tasks, setTasks] = useState<QueueTask[]>(initialTasks)
+  const [selectedRun, setSelectedRun] = useState<OrchestrationRun | null>(null)
 
   const activeAgents = agents.filter((agent) => agent.status === "active" || agent.status === "working")
+  const completedTasks = tasks.filter((task) => task.status === "completed")
   const totalTasks = agents.reduce((sum, agent) => sum + agent.tasksCompleted, 0)
   const avgCpu = Math.round(agents.reduce((sum, agent) => sum + agent.cpu, 0) / Math.max(1, agents.length))
   const avgMemory = Math.round(agents.reduce((sum, agent) => sum + agent.memory, 0) / Math.max(1, agents.length))
@@ -71,6 +78,24 @@ export function AdminConsole({ agents, districts }: AdminConsoleProps) {
   const remaining = Math.max(0, monthlyLimit - monthlyUsed)
   const subscriptionMrr = subscriptions.reduce((sum, subscription) => sum + Number(subscription.mrr.split(" ")[0]), 0)
   const topAgents = [...agents].sort((a, b) => b.tasksCompleted - a.tasksCompleted).slice(0, 5)
+  const liveMetrics = useMemo(() => {
+    const since = new Date()
+    since.setHours(0, 0, 0, 0)
+    const todayRuns = runs.filter((run) => Date.parse(run.startedAt) >= since.getTime())
+    const durations = todayRuns.map((run) => run.durationMs).filter((duration): duration is number => typeof duration === "number").sort((a, b) => a - b)
+    const p50 = durations.length ? durations[Math.floor((durations.length - 1) * 0.5)] : 0
+
+    return {
+      agentsOnline: activeAgents.length,
+      tasksToday: completedTasks.filter((task) => Date.parse(task.updatedAt) >= since.getTime()).length || todayRuns.reduce((sum, run) => sum + run.stepsCompleted, 0),
+      revenueToday: todayRuns.reduce((sum, run) => sum + Number(run.totalCostXlm), 0),
+      avgDurationMs: p50,
+    }
+  }, [activeAgents.length, completedTasks, runs])
+
+  const deadLetterTasks = tasks.filter((task) => task.status === "dead-letter")
+  const activeRuns = runs.filter((run) => run.status === "running" || run.stepsCompleted < run.stepsTotal).slice(0, 6)
+
   const districtCards = districts.map((district) => {
     const squad = agents.filter((agent) => agent.district === district.id)
     const working = squad.filter((agent) => agent.status === "working").length
@@ -83,6 +108,41 @@ export function AdminConsole({ agents, districts }: AdminConsoleProps) {
       avgLoad,
     }
   })
+
+  useEffect(() => {
+    let mounted = true
+
+    async function loadLiveData(): Promise<void> {
+      const [runsRes, tasksRes] = await Promise.all([
+        fetch("/api/admin/runs", { cache: "no-store" }),
+        fetch("/api/tasks?includeDeadLetter=1", { cache: "no-store" }),
+      ])
+      const [runsData, tasksData] = await Promise.all([runsRes.json(), tasksRes.json()])
+      if (!mounted) return
+      setRuns(Array.isArray(runsData.runs) ? runsData.runs : [])
+      setTasks(Array.isArray(tasksData.tasks) ? tasksData.tasks : [])
+    }
+
+    void loadLiveData().catch(() => undefined)
+    const interval = window.setInterval(() => void loadLiveData().catch(() => undefined), 15_000)
+    return () => {
+      mounted = false
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  const openRun = async (runId: string): Promise<void> => {
+    const res = await fetch(`/api/admin/runs/${encodeURIComponent(runId)}`, { cache: "no-store" })
+    const data = await res.json()
+    if (data.run) setSelectedRun(data.run)
+  }
+
+  const retryTask = async (taskId: string): Promise<void> => {
+    await fetch(`/api/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" })
+    const res = await fetch("/api/tasks?includeDeadLetter=1", { cache: "no-store" })
+    const data = await res.json()
+    setTasks(Array.isArray(data.tasks) ? data.tasks : [])
+  }
 
   const handleCopy = async () => {
     try {
@@ -173,6 +233,9 @@ export function AdminConsole({ agents, districts }: AdminConsoleProps) {
           <TabButton active={tab === "receipts"} onClick={() => setTab("receipts")} icon={<ReceiptText className="h-3.5 w-3.5" />}>
             Receipts
           </TabButton>
+          <TabButton active={tab === "agents"} onClick={() => setTab("agents")} icon={<UsersRound className="h-3.5 w-3.5" />}>
+            Agents
+          </TabButton>
           <a
             href="/admin/runs"
             className="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950/70 px-4 py-2 text-xs uppercase tracking-[0.2em] text-slate-400 transition hover:border-slate-700 hover:text-slate-200"
@@ -195,7 +258,9 @@ export function AdminConsole({ agents, districts }: AdminConsoleProps) {
         </nav>
 
         {tab === "queue" ? (
-          <TaskQueueTab />
+          <TaskQueueTab initialTasks={tasks} />
+        ) : tab === "agents" ? (
+          <AgentsTab agents={agents} tasks={tasks} runs={runs} />
         ): tab === "receipts" ? (
           <ReceiptsTab />
         ) : tab === "passport" ? (
@@ -222,6 +287,22 @@ export function AdminConsole({ agents, districts }: AdminConsoleProps) {
           <CloudAgentsTab />
         ) : (
         <>
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <SignalStat label="Agents online" value={String(liveMetrics.agentsOnline)} color="text-cyan-300" />
+          <SignalStat label="Tasks completed today" value={String(liveMetrics.tasksToday)} color="text-emerald-300" />
+          <SignalStat label="x402 revenue today" value={`${liveMetrics.revenueToday.toFixed(2)} XLM`} color="text-amber-300" />
+          <SignalStat label="Avg task duration" value={`${liveMetrics.avgDurationMs.toLocaleString()} ms`} color="text-violet-300" />
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
+          <Panel title="Active runs" eyebrow="Live orchestrator" bodyClassName="overflow-hidden">
+            <RunTable runs={activeRuns.length ? activeRuns : runs.slice(0, 5)} onOpen={openRun} />
+          </Panel>
+          <Panel title="Queue" eyebrow="Dead-letter recovery" bodyClassName="space-y-3">
+            {deadLetterTasks.length === 0 ? <p className="font-vt323 text-lg text-emerald-300">No dead-letter tasks.</p> : deadLetterTasks.slice(0, 4).map((task) => <DeadLetterCard key={task.id} task={task} onRetry={retryTask} />)}
+          </Panel>
+        </section>
+
         <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr_0.8fr]">
           <Panel
             title="Infra posture"
@@ -401,6 +482,7 @@ export function AdminConsole({ agents, districts }: AdminConsoleProps) {
         </section>
         </>
         )}
+        {selectedRun ? <RunModal run={selectedRun} onClose={() => setSelectedRun(null)} /> : null}
       </div>
     </main>
   )
@@ -756,12 +838,14 @@ type QueueTask = {
   targetCapability?: string
   retryCount: number
   maxRetries: number
+  createdAt?: string
+  updatedAt: string
   scheduledFor?: string
   error?: string
 }
 
-function TaskQueueTab() {
-  const [tasks, setTasks] = useState<QueueTask[]>([])
+function TaskQueueTab({ initialTasks = [] }: { initialTasks?: QueueTask[] }) {
+  const [tasks, setTasks] = useState<QueueTask[]>(initialTasks)
   const [loading, setLoading] = useState(true)
 
   const loadTasks = async () => {
@@ -828,6 +912,119 @@ function TaskQueueTab() {
     </section>
   )
 }
+
+function RunTable({ runs, onOpen }: { runs: RunListItem[]; onOpen: (runId: string) => void }) {
+  if (runs.length === 0) return <p className="font-vt323 text-lg text-slate-400">No orchestration runs have been recorded yet.</p>
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] text-left">
+        <thead>
+          <tr className="border-b border-slate-800 text-[10px] uppercase tracking-[0.24em] text-slate-500">
+            <th className="pb-3 font-normal">Run ID</th>
+            <th className="pb-3 font-normal">Goal</th>
+            <th className="pb-3 font-normal">Steps</th>
+            <th className="pb-3 font-normal">Progress</th>
+            <th className="pb-3 font-normal">Cost</th>
+            <th className="pb-3 font-normal">Started</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((run) => {
+            const progress = Math.round((run.stepsCompleted / Math.max(1, run.stepsTotal)) * 100)
+            return (
+              <tr key={run.id} onClick={() => onOpen(run.id)} className="cursor-pointer border-b border-slate-900/80 font-mono text-xs text-slate-300 transition hover:bg-cyan-400/5">
+                <td className="py-3 text-cyan-200">{run.id}</td>
+                <td className="max-w-[260px] truncate py-3">{run.goal}</td>
+                <td className="py-3">{run.stepsCompleted}/{run.stepsTotal}</td>
+                <td className="py-3">{progress}%</td>
+                <td className="py-3 text-emerald-300">{run.totalCostXlm} XLM</td>
+                <td className="py-3">{formatRelative(run.startedAt)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function DeadLetterCard({ task, onRetry }: { task: QueueTask; onRetry?: (taskId: string) => void }) {
+  return (
+    <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4">
+      <p className="truncate font-mono text-sm text-rose-100">{task.id}</p>
+      <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-slate-400">{task.targetAgentId ?? task.targetDistrict ?? task.targetCapability ?? "unassigned"} / retry {task.retryCount}</p>
+      <p className="mt-2 line-clamp-2 text-sm text-slate-300">{task.error ?? "No failure reason recorded"}</p>
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={() => onRetry(task.id)}
+          className="mt-3 rounded-full border border-rose-300/40 px-3 py-2 text-xs uppercase tracking-[0.2em] text-rose-100 transition hover:bg-rose-300/10"
+        >
+          Retry
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function RunModal({ run, onClose }: { run: OrchestrationRun; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur">
+      <section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[28px] border border-cyan-500/30 bg-slate-950 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="font-mono text-sm text-cyan-300">{run.id} / {run.status}</p>
+            <h3 className="mt-2 font-pixel text-xl uppercase text-cyan-100">{run.goal}</h3>
+            <p className="mt-2 font-mono text-xs text-slate-400">Cost {run.totalCostXlm} XLM · Started {new Date(run.startedAt).toLocaleString()}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full border border-slate-700 p-2 text-slate-300 hover:text-cyan-200"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="mt-5 space-y-3">
+          {run.steps.map((step) => (
+            <div key={step.id} className="rounded-2xl border border-slate-800 bg-[#09101a] p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-mono text-sm text-slate-100">{step.task}</p>
+                  <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">{step.agentName} · {step.agentId} · {step.status}</p>
+                </div>
+                <p className="font-mono text-xs text-emerald-300">{step.costXlm ?? "0.00"} XLM</p>
+              </div>
+              {step.result ? <pre className="mt-3 overflow-x-auto rounded-xl bg-slate-950 p-3 font-mono text-xs text-slate-300">{JSON.stringify(step.result, null, 2)}</pre> : null}
+              <p className="mt-3 font-vt323 text-lg text-slate-400">{step.logs.join(" · ")}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function AgentsTab({ agents, tasks, runs }: { agents: MoltbotAgent[]; tasks: QueueTask[]; runs: RunListItem[] }) {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  return (
+    <Panel title="Registered agents" eyebrow="Runtime registry" bodyClassName="overflow-x-auto">
+      <table className="w-full min-w-[980px] text-left">
+        <thead><tr className="border-b border-slate-800 text-[10px] uppercase tracking-[0.24em] text-slate-500"><th className="pb-3 font-normal">Name</th><th className="pb-3 font-normal">Model</th><th className="pb-3 font-normal">District</th><th className="pb-3 font-normal">Status</th><th className="pb-3 font-normal">XP</th><th className="pb-3 font-normal">Level</th><th className="pb-3 font-normal">Tasks today</th><th className="pb-3 font-normal">Revenue today</th></tr></thead>
+        <tbody>{agents.map((agent) => {
+          const tasksToday = tasks.filter((task) => task.targetAgentId === agent.id && task.status === "completed" && Date.parse(task.updatedAt) >= today.getTime()).length || agent.tasksCompleted
+          const revenue = runs.filter((run) => Date.parse(run.startedAt) >= today.getTime()).reduce((sum, run) => sum + Number(run.totalCostXlm) / Math.max(1, agents.length), 0)
+          return <tr key={agent.id} className="border-b border-slate-900/80 font-mono text-xs text-slate-300"><td className="py-3"><a className="text-cyan-200 hover:underline" href={`/leaderboard/${encodeURIComponent(agent.id)}`}>{agent.name}</a></td><td className="py-3">{agent.model}</td><td className="py-3">{agent.district}</td><td className="py-3">{agent.status}</td><td className="py-3">{agent.xp ?? 0}</td><td className="py-3">{agent.level ?? 1}</td><td className="py-3">{tasksToday}</td><td className="py-3 text-emerald-300">{revenue.toFixed(2)} XLM</td></tr>
+        })}</tbody>
+      </table>
+    </Panel>
+  )
+}
+
+function formatRelative(value: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  return `${hours}h ago`
+}
+
 
 function TabButton({
   active,
