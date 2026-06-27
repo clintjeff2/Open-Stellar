@@ -590,6 +590,50 @@ export function OpenStellarHub() {
   }, [animateAgentToDistrict, audioEngine, pushLog, showAgentOverlay, spawnParticles])
 
   useEffect(() => {
+    let stopped = false
+
+    const hydrateAgents = async () => {
+      try {
+        const [agentsRes, positionsRes] = await Promise.all([
+          fetch("/api/agents?state=1", { cache: "no-store" }),
+          fetch("/api/agents/positions", { cache: "no-store" }),
+        ])
+
+        if (stopped || !agentsRes.ok) return
+
+        const agentsData = await agentsRes.json() as { agents?: MoltbotAgent[] }
+        const positionsData = positionsRes.ok
+          ? await positionsRes.json() as { positions?: AgentPositionPayload[] }
+          : { positions: [] }
+
+        if (!Array.isArray(agentsData.agents) || agentsData.agents.length === 0) return
+
+        const positionsById = new Map((positionsData.positions ?? []).map((position) => [position.agentId, position]))
+        setAgents(agentsData.agents.map((agent) => {
+          const position = positionsById.get(agent.id)
+          return position ? {
+            ...agent,
+            pixelX: position.pixelX,
+            pixelY: position.pixelY,
+            targetX: position.targetX,
+            targetY: position.targetY,
+            direction: position.direction,
+          } : agent
+        }))
+        pushLog("agent state hydrated from persistent store", "success")
+      } catch {
+        pushLog("persistent agent state unavailable; using local defaults", "warning")
+      }
+    }
+
+    hydrateAgents()
+
+    return () => {
+      stopped = true
+    }
+  }, [pushLog])
+
+  useEffect(() => {
     const eventSource = new EventSource("/api/events")
     const eventTypes = [
       "agent.status",
@@ -801,6 +845,25 @@ export function OpenStellarHub() {
       window.clearInterval(heartbeatId)
       window.clearInterval(healthId)
     }
+  }, [])
+
+  useEffect(() => {
+    const syncPositionBatch = async () => {
+      const snapshot = agentsRef.current
+      await fetch("/api/agents/positions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agents: snapshot }),
+      })
+    }
+
+    const interval = window.setInterval(() => {
+      void syncPositionBatch()
+    }, 5000)
+
+    void syncPositionBatch()
+
+    return () => window.clearInterval(interval)
   }, [])
 
   useEffect(() => {
