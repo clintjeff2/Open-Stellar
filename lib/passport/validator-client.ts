@@ -28,7 +28,7 @@ export * as rpc from "@stellar/stellar-sdk/rpc";
 if (typeof window !== "undefined") {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore Buffer exists
-  window.Buffer = window.Buffer || Buffer;
+  (window as any).Buffer = (window as any).Buffer || Buffer;
 }
 
 

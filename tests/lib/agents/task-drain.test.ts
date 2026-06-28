@@ -67,19 +67,19 @@ describe("task-queue drain and purge", () => {
     })
 
     it("caps maxItems at 200", async () => {
-      // MAX_PENDING_PER_AGENT=300
-      for (let i = 0; i < 250; i++) {
+      // Create 350 tasks (MAX_PENDING_PER_AGENT=300 limits to 300)
+      for (let i = 0; i < 350; i++) {
         createTask("agent-1", { type: `task-${i}`, payload: {} })
       }
 
       const { result } = await drainAgentTasks("agent-1", { maxItems: 300 })
 
       expect(result).not.toBeNull()
-      // MAX_DRAIN_ITEMS = 200
+      // MAX_DRAIN_ITEMS=200 limits drain to 200 tasks
       expect(result!.processed).toBe(200)
 
       const stats = getQueueStats()
-      expect(stats.pendingTasks).toBe(50)
+      expect(stats.pendingTasks).toBe(100) // 300 - 200 = 100
       expect(stats.completedTasks).toBe(200)
     })
 
