@@ -209,27 +209,29 @@ describe("task-queue drain and purge", () => {
       expect(purged).toBe(0)
     })
 
-    it("does not purge running tasks", () => {
+    it("does not purge running tasks", async () => {
       createTask("agent-1", { type: "a", payload: {} })
       createTask("agent-1", { type: "b", payload: {} })
 
+      let purgeResult = -1
       // Start processing first task (it will be running)
-      const { result } = drainAgentTasks("agent-1", {
+      const { result } = await drainAgentTasks("agent-1", {
         maxItems: 1,
-        processor: async (task) => {
-          // First task is now running, then completed
+        processor: async () => {
+          // Task is now running - attempt purge
+          purgeResult = purgeAgentTasks("agent-1")
         },
       })
+
       expect(result!.processed).toBe(1)
-
-      const purged = purgeAgentTasks("agent-1")
-
-      // Should only purge the one pending task
-      expect(purged).toBe(1)
+      // Should only purge the one pending task ('b')
+      expect(purgeResult).toBe(1)
 
       const tasks = listAgentTasks("agent-1")
-      // Should have 1 completed task remaining
+      // Should have 1 completed task remaining ('a')
       expect(tasks.filter((t) => t.status === "completed")).toHaveLength(1)
+      // 'b' should be gone
+      expect(tasks.filter((t) => t.type === "b")).toHaveLength(0)
     })
 
     it("isolates purge between agents", () => {
