@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import {
   createTask,
   drainAgentTasks,
+  dequeueNextTask,
   purgeAgentTasks,
   resetTaskQueue,
   listAgentTasks,
@@ -213,14 +214,10 @@ describe("task-queue drain and purge", () => {
       createTask("agent-1", { type: "a", payload: {} })
       createTask("agent-1", { type: "b", payload: {} })
 
-      // Start processing first task (it will be running)
-      const { result } = drainAgentTasks("agent-1", {
-        maxItems: 1,
-        processor: async (task) => {
-          // First task is now running, then completed
-        },
-      })
-      expect(result!.processed).toBe(1)
+      // Transition first task to running
+      const runningTask = dequeueNextTask("agent-1")
+      expect(runningTask).not.toBeNull()
+      expect(runningTask!.status).toBe("running")
 
       const purged = purgeAgentTasks("agent-1")
 
@@ -228,8 +225,9 @@ describe("task-queue drain and purge", () => {
       expect(purged).toBe(1)
 
       const tasks = listAgentTasks("agent-1")
-      // Should have 1 completed task remaining
-      expect(tasks.filter((t) => t.status === "completed")).toHaveLength(1)
+      // Should have 1 running task remaining
+      expect(tasks.filter((t) => t.status === "running")).toHaveLength(1)
+      expect(tasks.find((t) => t.id === runningTask!.id)).toBeDefined()
     })
 
     it("isolates purge between agents", () => {
