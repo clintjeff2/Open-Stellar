@@ -19,6 +19,7 @@ export interface AgentCapabilityManifest {
   capabilities: string[]
   skillVersions?: SkillRegistration[]
   dependencies?: string[]
+  tags?: string[]
   x402: AgentX402Manifest
   status: AgentStatus
   endpoint: string
@@ -118,6 +119,16 @@ function normalizeDependencies(value: unknown): string[] | undefined {
   return Array.from(new Set(dependencies))
 }
 
+function normalizeTags(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) {
+    throw new TypeError("tags must be an array")
+  }
+
+  const tags = value.map((tag, index) => normalizeString(tag, `tags[${index}]`))
+  return Array.from(new Set(tags))
+}
+
 function normalizeX402(value: unknown): AgentX402Manifest {
   if (!isRecord(value)) {
     throw new Error("x402 must be an object")
@@ -200,6 +211,7 @@ export function registerAgent(input: unknown): AgentCapabilityManifest {
   const now = new Date().toISOString()
   const agentId = normalizeString(input.agentId, "agentId")
   const dependencies = normalizeDependencies(input.dependencies)
+  const tags = normalizeTags(input.tags)
   validateDependencies(agentId, dependencies ?? [])
 
   const agent: AgentCapabilityManifest = {
@@ -209,6 +221,7 @@ export function registerAgent(input: unknown): AgentCapabilityManifest {
     capabilities: normalizeCapabilities(input.capabilities),
     ...(normalizeSkillVersions(input.skillVersions) === undefined ? {} : { skillVersions: normalizeSkillVersions(input.skillVersions) }),
     ...(dependencies === undefined ? {} : { dependencies }),
+    ...(tags === undefined ? {} : { tags }),
     x402: normalizeX402(input.x402),
     status: normalizeStatus(input.status),
     endpoint: normalizeString(input.endpoint, "endpoint"),

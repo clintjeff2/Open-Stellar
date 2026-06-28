@@ -11,6 +11,11 @@ export default defineConfig({
       include: ["app/api/**/*.ts", "lib/**/*.ts"],
       exclude: ["lib/passport/validator-client.ts", "lib/passport/snarkjs.d.ts", "node_modules/", "dist/"],
     },
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/packages/create-app/template/**"
+    ],
   },
   resolve: {
     alias: {

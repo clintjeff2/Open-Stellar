@@ -1,5 +1,6 @@
 import { addNotification } from "@/lib/notifications/notification-store"
 import { invalidateLeaderboardCache } from "./leaderboard-cache"
+import { questStoreData, persistQuestStore, StoredQuest } from "./quest-store"
 
 export type QuestType = "daily" | "weekly" | "story"
 
@@ -246,7 +247,7 @@ export function addSubTask(questId: string, title: string, assignedAgentId?: str
   subtasks.push(newSubTask)
   subtaskDb.set(questId, subtasks)
 
-  questStoreData.quests = getQuests()
+  questStoreData.quests = getQuests() as StoredQuest[]
   persistQuestStore()
 
   return newSubTask
@@ -276,7 +277,7 @@ export function updateSubTask(
   subtasks[index] = updated
   subtaskDb.set(questId, subtasks)
 
-  questStoreData.quests = getQuests()
+  questStoreData.quests = getQuests() as StoredQuest[]
   persistQuestStore()
 
   return updated

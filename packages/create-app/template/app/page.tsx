@@ -26,7 +26,7 @@ export default function HomePage() {
       <section style={{ marginTop: '1.5rem', padding: '1.25rem', border: '1px solid #1e293b', borderRadius: 16 }}>
         <h2 style={{ fontSize: '1.1rem' }}>Agents</h2>
         <ul>
-          {agents.map((agent) => (
+          {agents.map((agent: any) => (
             <li key={agent.id}>
               {agent.name} - <code>{agent.serviceId}</code>
             </li>

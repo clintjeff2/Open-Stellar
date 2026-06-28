@@ -36,6 +36,9 @@ describe("agent registry API", () => {
     expect(postBody.agent.agentId).toBe("nexus-7")
     expect(postBody.agent.registeredAt).toEqual(expect.any(String))
 
+    // Record heartbeat so it's considered 'active' (healthy)
+    recordAgentHeartbeat("nexus-7", { status: "active" })
+
     const list = await GET(new Request("http://localhost/api/agents?district=data-center&status=active&skill=log-analysis"))
     const listBody = await list.json()
 

@@ -54,7 +54,7 @@ if (!globalXp.__openStellarAgentXpDb__) {
   globalXp.__openStellarAgentXpDb__ = agentXpDb
   if (questStoreData && questStoreData.agentXp) {
     for (const [agentId, record] of Object.entries(questStoreData.agentXp)) {
-      agentXpDb.set(agentId, record)
+      agentXpDb.set(agentId, record as AgentXPRecord)
     }
   }
 }

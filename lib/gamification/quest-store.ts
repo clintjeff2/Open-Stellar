@@ -4,6 +4,12 @@ import { publishSystemEvent } from "@/lib/events/system-events"
 
 export type QuestStatus = "in_progress" | "completed" | "expired"
 
+export interface QuestStoreData {
+  quests: StoredQuest[]
+  agentXp: Record<string, any>
+  questStats: Record<string, any>
+}
+
 export interface StoredQuest {
   id: string
   type: QuestType
@@ -27,6 +33,8 @@ interface QuestStore {
 
 const globalState = globalThis as typeof globalThis & {
   __openStellarQuestStore__?: QuestStore
+  __openStellarQuestStoreData__?: QuestStoreData
+  __openStellarQuestStoreLoaded__?: boolean
 }
 
 function getStore(): QuestStore {
@@ -36,6 +44,69 @@ function getStore(): QuestStore {
     }
   }
   return globalState.__openStellarQuestStore__
+}
+
+export const questStoreData: QuestStoreData = globalState.__openStellarQuestStoreData__ || {
+  quests: [],
+  agentXp: {},
+  questStats: {},
+}
+
+if (!globalState.__openStellarQuestStoreData__) {
+  globalState.__openStellarQuestStoreData__ = questStoreData
+}
+
+function getStoreFile() {
+  try {
+    // eslint-disable-next-line no-eval
+    const path = eval("require")("path")
+    return path.join(process.cwd(), "quest-store.json")
+  } catch (e) {
+    return "quest-store.json"
+  }
+}
+
+export function persistQuestStore(): void {
+  try {
+    // eslint-disable-next-line no-eval
+    const fs = eval("require")("fs")
+    // eslint-disable-next-line no-eval
+    const path = eval("require")("path")
+    const storeFile = getStoreFile()
+    const dir = path.dirname(storeFile)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    fs.writeFileSync(storeFile, JSON.stringify(questStoreData, null, 2))
+  } catch (error) {
+    // Silence errors in environments where fs is not available
+  }
+}
+
+export function loadQuestStore(): void {
+  if (globalState.__openStellarQuestStoreLoaded__) return
+
+  try {
+    // eslint-disable-next-line no-eval
+    const fs = eval("require")("fs")
+    const storeFile = getStoreFile()
+    if (fs.existsSync(storeFile)) {
+      const data = JSON.parse(fs.readFileSync(storeFile, "utf8"))
+      questStoreData.quests = data.quests || []
+      questStoreData.agentXp = data.agentXp || {}
+      questStoreData.questStats = data.questStats || {}
+
+      // Sync to Map-based store
+      const store = getStore()
+      for (const q of questStoreData.quests) {
+        store.quests.set(q.id, q)
+      }
+    }
+  } catch (error) {
+    console.warn("Failed to load quest store, falling back to empty store:", error)
+  }
+
+  globalState.__openStellarQuestStoreLoaded__ = true
 }
 
 export function createQuest(input: {
@@ -164,6 +235,10 @@ export function runQuestExpiryCheck(nowMs = Date.now()): {
 
 export function resetQuestStore(): void {
   getStore().quests.clear()
+  questStoreData.quests = []
+  questStoreData.agentXp = {}
+  questStoreData.questStats = {}
+  persistQuestStore()
 }
 
 export function seedQuest(quest: Partial<StoredQuest> & { id: string }): StoredQuest {
