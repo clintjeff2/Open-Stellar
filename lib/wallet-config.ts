@@ -1,5 +1,5 @@
-import { createConfig, http, injected } from 'wagmi'
-import { walletConnect } from '@wagmi/connectors'
+import { createConfig, http } from 'wagmi'
+import { injected, walletConnect } from 'wagmi/connectors'
 import { bscTestnet, bsc } from 'wagmi/chains'
 
 const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
